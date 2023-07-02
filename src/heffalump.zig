@@ -78,18 +78,6 @@ pub const Cursor = struct {
         try Cursor.checkResultStatus(self.result);
     }
 
-    // primeira linha
-
-    fn FetchResult(comptime T: type) type {
-        // void is just a shortcut
-        return if (T == void) []const []const []const u8 else []const []const T;
-    }
-
-    pub fn fetch(self: *Cursor, allocator: std.mem.Allocator, comptime T: type) !FetchResult(T) {
-        _ = allocator;
-        _ = self;
-    }
-
     /// fetches the fist rows only and parses the data
     pub fn fetchOneSameType(self: *Cursor, allocator: std.mem.Allocator, comptime T: type) ![]T {
         const n_columns: usize = @intCast(c.PQnfields(self.result));
@@ -287,22 +275,5 @@ test "parse mult value" {
         try std.testing.expect(3 == data[2]);
         try std.testing.expect(4 == data[3]);
         try std.testing.expect(5 == data[4]);
-    }
-}
-
-test "fetch" {
-    const allocator = std.testing.allocator;
-    const settings = ConnectionSetting{};
-
-    var conn = try Connection.init(&settings);
-    defer conn.close();
-
-    var cur = conn.cursor();
-    defer cur.close();
-
-    try cur.execute("select 1, 'ola mundo'", .{});
-    {
-        var data = try cur.fetch(allocator, struct { usize, []const u8 });
-        defer allocator.free(data);
     }
 }
