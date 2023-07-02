@@ -79,8 +79,46 @@ pub const Cursor = struct {
     }
 
     // primeira linha
-    pub fn fetchOne() void {
-        @panic("Not Implemented");
+
+    fn FetchResult(comptime T: type) type {
+        // void is just a shortcut
+        return if (T == void) []const []const []const u8 else []const []const T;
+    }
+
+    pub fn fetch(self: *Cursor, allocator: std.mem.Allocator, comptime T: type) !FetchResult(T) {
+        _ = allocator;
+        _ = self;
+    }
+
+    /// fetches the fist rows only and parses the data
+    pub fn fetchOneSameType(self: *Cursor, allocator: std.mem.Allocator, comptime T: type) ![]T {
+        const n_columns: usize = @intCast(c.PQnfields(self.result));
+        var counter: c_int = 0;
+        var result = try allocator.alloc(T, n_columns);
+        errdefer allocator.free(result);
+
+        while (counter < n_columns) : (counter += 1) {
+            const data = std.mem.span(c.PQgetvalue(self.result, 0, counter));
+            var i: usize = @intCast(counter);
+            switch (T) {
+                comptime_int, i32, usize, i64 => {
+                    result[i] = try std.fmt.parseInt(T, data, 10);
+                },
+                u8, []u8, []const u8 => {
+                    result[i] = data;
+                },
+                comptime_float, f32, f64 => {
+                    result[i] = try std.fmt.parseFloat(T, data);
+                },
+
+                else => {
+                    std.log.err("Note: type is {}", .{T});
+                    return error.CannotParseThisType;
+                },
+            }
+        }
+
+        return result;
     }
 
     // um por vez
@@ -129,7 +167,7 @@ pub const Cursor = struct {
             };
         }
 
-        return error.HollyCow;
+        return error.NotDataToFetch;
     }
 
     pub fn close(self: *Cursor) void {
@@ -190,3 +228,81 @@ pub const ConnectionSetting = struct {
         );
     }
 };
+
+test "parse single value" {
+    const allocator = std.testing.allocator;
+    const settings = ConnectionSetting{};
+
+    var conn = try Connection.init(&settings);
+    defer conn.close();
+
+    var cur = conn.cursor();
+    defer cur.close();
+
+    const Test = struct {
+        Type: type,
+        query: []const u8,
+    };
+
+    const values = .{ 1, 1.0, "ola mundo" };
+    const tests = [_]Test{
+        .{ .Type = usize, .query = "select 1" },
+        .{ .Type = f32, .query = "select 1.0" },
+        .{ .Type = []const u8, .query = "select 'ola mundo'" },
+    };
+
+    inline for (tests, values) |t, val| {
+        try cur.execute(t.query, .{});
+        {
+            var data = try cur.fetchOneSameType(allocator, t.Type);
+            defer allocator.free(data);
+            try std.testing.expect(data.len == 1);
+
+            if (t.Type != []const u8)
+                try std.testing.expect(val == data[0]);
+
+            if (t.Type == []const u8)
+                try std.testing.expect(std.mem.eql(u8, data[0], val));
+        }
+    }
+}
+
+test "parse mult value" {
+    const allocator = std.testing.allocator;
+    const settings = ConnectionSetting{};
+
+    var conn = try Connection.init(&settings);
+    defer conn.close();
+
+    var cur = conn.cursor();
+    defer cur.close();
+
+    try cur.execute("select 1, 2, 3, 4, 5", .{});
+    {
+        var data = try cur.fetchOneSameType(allocator, usize);
+        defer allocator.free(data);
+        try std.testing.expect(data.len == 5);
+        try std.testing.expect(1 == data[0]);
+        try std.testing.expect(2 == data[1]);
+        try std.testing.expect(3 == data[2]);
+        try std.testing.expect(4 == data[3]);
+        try std.testing.expect(5 == data[4]);
+    }
+}
+
+test "fetch" {
+    const allocator = std.testing.allocator;
+    const settings = ConnectionSetting{};
+
+    var conn = try Connection.init(&settings);
+    defer conn.close();
+
+    var cur = conn.cursor();
+    defer cur.close();
+
+    try cur.execute("select 1, 'ola mundo'", .{});
+    {
+        var data = try cur.fetch(allocator, struct { usize, []const u8 });
+        defer allocator.free(data);
+    }
+}

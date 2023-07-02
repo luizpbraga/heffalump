@@ -1,0 +1,48 @@
+
+
+fn fetch( allocator, T) Result(T) {}
+
+Result(T) {
+    data: [][]T
+    allocator
+}
+
+se T = i32, u8, f32, bool
+    retorno: { {t, t, ..., t}, {t, t, ..., t} } :  [][]T
+
+se T = []i32, []u8, []f32, []bool
+    retorno { t, t, ..., t}: []T
+
+se T = struct{}
+    return { struct{...}, struct{...}, ...}
+
+select 1 -> usize
+
+select 1, 'a' -> struct
+
+select [1,2,3], ['a', 'b', 'c'] -> struct
+
+// connect via ConnectionSettings{}
+conn = Connect(.{});
+deinit conn.close();
+
+cur = conn.cursor();
+deinit cur.close();
+
+try conn.exec(query, args);
+
+result = cur.fetch(allocator)
+result.deinit()
+
+result = cur.fetchOne(allocator)
+result.deinit()
+
+result = cur.fetch(allocator, SomeType)
+result.deinit()
+
+iter = cur.fetchIter()
+
+while (iter.next()) |result| {
+    data = try result.parse( struct{ i32, i32, i32} )
+    defer result.free(data);
+} 
