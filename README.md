@@ -1,5 +1,7 @@
 # Heffalump 
 
+Looks like `psycopg`, but we have allocators
+
 ![Heffalump](./zheffalump.jpg "Separados ao nascer")
 
 ### Example
