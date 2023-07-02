@@ -78,9 +78,55 @@ pub const Cursor = struct {
         try Cursor.checkResultStatus(self.result);
     }
 
+    // // primeira linha
+    // pub fn fetchOne(self: *Cursor, allocator: std.mem.Allocator, comptime T: type) ![]T {
+    //     const data = std.mem.span(c.PQgetvalue(self.result, 0, 0));
+    //     var result = try allocator.alloc(T, 1);
+
+    //     if (std.meta.trait.isIntegral(T)) {
+    //         result[0] = try std.fmt.parseInt(T, data, 10);
+    //         return result;
+    //     }
+
+    //     if (std.meta.trait.isZigString(T)) {
+    //         std.debug.print("ola", .{});
+    //         result[0] = data;
+    //         return result;
+    //     }
+
+    //     if (std.meta.trait.isFloat(T)) {
+    //         result[0] = try std.fmt.parseFloat(T, data);
+    //         return result;
+    //     }
+
+    //     std.log.err("Note: type is {}", .{T});
+    //     return error.CannotParseThisType;
+    // }
+
     // primeira linha
-    pub fn fetchOne() void {
-        @panic("Not Implemented");
+    pub fn fetchOne(self: *Cursor, allocator: std.mem.Allocator, comptime T: type) ![]T {
+        const data = std.mem.span(c.PQgetvalue(self.result, 0, 0));
+        var result = try allocator.alloc(T, 1);
+        errdefer allocator.free(result);
+
+        switch (T) {
+            comptime_int, i32, usize, i64 => {
+                result[0] = try std.fmt.parseInt(T, data, 10);
+            },
+            u8, []u8, []const u8 => {
+                result[0] = data;
+            },
+            comptime_float, f32, f64 => {
+                result[0] = try std.fmt.parseFloat(T, data);
+            },
+
+            else => {
+                std.log.err("Note: type is {}", .{T});
+                return error.CannotParseThisType;
+            },
+        }
+
+        return result;
     }
 
     // um por vez
@@ -129,7 +175,7 @@ pub const Cursor = struct {
             };
         }
 
-        return error.HollyCow;
+        return error.NotDataToFetch;
     }
 
     pub fn close(self: *Cursor) void {
@@ -190,3 +236,33 @@ pub const ConnectionSetting = struct {
         );
     }
 };
+
+test "parse" {
+    const allocator = std.testing.allocator;
+    const settings = ConnectionSetting{};
+
+    var conn = try Connection.init(&settings);
+    defer conn.close();
+
+    var cur = conn.cursor();
+    defer cur.close();
+
+    try cur.execute("select 1", .{});
+    {
+        var data = try cur.fetchOne(allocator, usize);
+        defer allocator.free(data);
+        try std.testing.expect(1 == data[0]);
+    }
+    try cur.execute("select 1.0", .{});
+    {
+        var data = try cur.fetchOne(allocator, f32);
+        defer allocator.free(data);
+        try std.testing.expect(1.0 == data[0]);
+    }
+    try cur.execute("select 'ola mundo'", .{});
+    {
+        var data = try cur.fetchOne(allocator, []u8);
+        defer allocator.free(data);
+        try std.testing.expect(std.mem.eql(u8, data[0], "ola mundo"));
+    }
+}
