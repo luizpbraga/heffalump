@@ -1,17 +1,20 @@
-# Heffalump 
+const std = @import("std");
+const testing = std.testing;
+const hefallump = @import("heffalump.zig");
 
+export fn add(a: i32, b: i32) i32 {
+    return a + b;
+}
 
-### Example
+test "basic add functionality" {
+    try testing.expect(add(3, 7) == 10);
+}
 
-```zig
-const std = @impot("std");
-const heffalump = @impot("heffalump");
-
-test "Heffalump" {
+test "main" {
     const allocator = std.testing.allocator;
-    const settings = heffalump.ConnectionSetting{};
+    const settings = hefallump.ConnectionSetting{};
 
-    var conn = try heffalump.Connection.init(&settings);
+    var conn = try hefallump.Connection.init(&settings);
     defer conn.close();
 
     var cur = conn.cursor();
@@ -31,10 +34,7 @@ test "Heffalump" {
     try cur.execute("insert into Cars values(4,'Volvo',29000)", .{});
     try cur.execute("insert into Cars values(5,'BMW',78000)", .{});
 
-    //
-    // The rule is simple: kill the bitch after using
-    //
-
+    // The rule is simple: kill after using
     try cur.execute("select * from Cars", .{});
     {
         var record = try cur.fetchAll(allocator);
@@ -61,4 +61,3 @@ test "Heffalump" {
         }
     }
 }
-```
