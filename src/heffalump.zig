@@ -78,52 +78,44 @@ pub const Cursor = struct {
         try Cursor.checkResultStatus(self.result);
     }
 
-    // // primeira linha
-    // pub fn fetchOne(self: *Cursor, allocator: std.mem.Allocator, comptime T: type) ![]T {
-    //     const data = std.mem.span(c.PQgetvalue(self.result, 0, 0));
-    //     var result = try allocator.alloc(T, 1);
-
-    //     if (std.meta.trait.isIntegral(T)) {
-    //         result[0] = try std.fmt.parseInt(T, data, 10);
-    //         return result;
-    //     }
-
-    //     if (std.meta.trait.isZigString(T)) {
-    //         std.debug.print("ola", .{});
-    //         result[0] = data;
-    //         return result;
-    //     }
-
-    //     if (std.meta.trait.isFloat(T)) {
-    //         result[0] = try std.fmt.parseFloat(T, data);
-    //         return result;
-    //     }
-
-    //     std.log.err("Note: type is {}", .{T});
-    //     return error.CannotParseThisType;
-    // }
-
     // primeira linha
-    pub fn fetchOne(self: *Cursor, allocator: std.mem.Allocator, comptime T: type) ![]T {
-        const data = std.mem.span(c.PQgetvalue(self.result, 0, 0));
-        var result = try allocator.alloc(T, 1);
+
+    fn FetchResult(comptime T: type) type {
+        // void is just a shortcut
+        return if (T == void) []const []const []const u8 else []const []const T;
+    }
+
+    pub fn fetch(self: *Cursor, allocator: std.mem.Allocator, comptime T: type) !FetchResult(T) {
+        _ = allocator;
+        _ = self;
+    }
+
+    /// fetches the fist rows only and parses the data
+    pub fn fetchOneSameType(self: *Cursor, allocator: std.mem.Allocator, comptime T: type) ![]T {
+        const n_columns: usize = @intCast(c.PQnfields(self.result));
+        var counter: c_int = 0;
+        var result = try allocator.alloc(T, n_columns);
         errdefer allocator.free(result);
 
-        switch (T) {
-            comptime_int, i32, usize, i64 => {
-                result[0] = try std.fmt.parseInt(T, data, 10);
-            },
-            u8, []u8, []const u8 => {
-                result[0] = data;
-            },
-            comptime_float, f32, f64 => {
-                result[0] = try std.fmt.parseFloat(T, data);
-            },
+        while (counter < n_columns) : (counter += 1) {
+            const data = std.mem.span(c.PQgetvalue(self.result, 0, counter));
+            var i: usize = @intCast(counter);
+            switch (T) {
+                comptime_int, i32, usize, i64 => {
+                    result[i] = try std.fmt.parseInt(T, data, 10);
+                },
+                u8, []u8, []const u8 => {
+                    result[i] = data;
+                },
+                comptime_float, f32, f64 => {
+                    result[i] = try std.fmt.parseFloat(T, data);
+                },
 
-            else => {
-                std.log.err("Note: type is {}", .{T});
-                return error.CannotParseThisType;
-            },
+                else => {
+                    std.log.err("Note: type is {}", .{T});
+                    return error.CannotParseThisType;
+                },
+            }
         }
 
         return result;
@@ -237,7 +229,7 @@ pub const ConnectionSetting = struct {
     }
 };
 
-test "parse" {
+test "parse single value" {
     const allocator = std.testing.allocator;
     const settings = ConnectionSetting{};
 
@@ -247,22 +239,70 @@ test "parse" {
     var cur = conn.cursor();
     defer cur.close();
 
-    try cur.execute("select 1", .{});
+    const Test = struct {
+        Type: type,
+        query: []const u8,
+    };
+
+    const values = .{ 1, 1.0, "ola mundo" };
+    const tests = [_]Test{
+        .{ .Type = usize, .query = "select 1" },
+        .{ .Type = f32, .query = "select 1.0" },
+        .{ .Type = []const u8, .query = "select 'ola mundo'" },
+    };
+
+    inline for (tests, values) |t, val| {
+        try cur.execute(t.query, .{});
+        {
+            var data = try cur.fetchOneSameType(allocator, t.Type);
+            defer allocator.free(data);
+            try std.testing.expect(data.len == 1);
+
+            if (t.Type != []const u8)
+                try std.testing.expect(val == data[0]);
+
+            if (t.Type == []const u8)
+                try std.testing.expect(std.mem.eql(u8, data[0], val));
+        }
+    }
+}
+
+test "parse mult value" {
+    const allocator = std.testing.allocator;
+    const settings = ConnectionSetting{};
+
+    var conn = try Connection.init(&settings);
+    defer conn.close();
+
+    var cur = conn.cursor();
+    defer cur.close();
+
+    try cur.execute("select 1, 2, 3, 4, 5", .{});
     {
-        var data = try cur.fetchOne(allocator, usize);
+        var data = try cur.fetchOneSameType(allocator, usize);
         defer allocator.free(data);
+        try std.testing.expect(data.len == 5);
         try std.testing.expect(1 == data[0]);
+        try std.testing.expect(2 == data[1]);
+        try std.testing.expect(3 == data[2]);
+        try std.testing.expect(4 == data[3]);
+        try std.testing.expect(5 == data[4]);
     }
-    try cur.execute("select 1.0", .{});
+}
+
+test "fetch" {
+    const allocator = std.testing.allocator;
+    const settings = ConnectionSetting{};
+
+    var conn = try Connection.init(&settings);
+    defer conn.close();
+
+    var cur = conn.cursor();
+    defer cur.close();
+
+    try cur.execute("select 1, 'ola mundo'", .{});
     {
-        var data = try cur.fetchOne(allocator, f32);
+        var data = try cur.fetch(allocator, struct { usize, []const u8 });
         defer allocator.free(data);
-        try std.testing.expect(1.0 == data[0]);
-    }
-    try cur.execute("select 'ola mundo'", .{});
-    {
-        var data = try cur.fetchOne(allocator, []u8);
-        defer allocator.free(data);
-        try std.testing.expect(std.mem.eql(u8, data[0], "ola mundo"));
     }
 }
