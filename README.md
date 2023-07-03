@@ -9,11 +9,19 @@ Looks like `psycopg`, but we have allocators
 ```zig
 const std = @import("std");
 const hefa = @import("heffalump.zig");
+const getenv = std.os.getenv;
 const expect = std.testing.expect;
+const allocator = std.testing.allocator;
 
-test "Hefallump\n" {
-    const allocator = std.testing.allocator;
-    const settings = hefa.ConnectionSetting{};
+test "Hefallump" {
+
+    const settings = ConnectionSetting{
+        .port = getenv("DB_PORT"),
+        .user = getenv("DB_USER"),
+        .host = getenv("DB_HOST"),
+        .dbname = getenv("DB_NAME"),
+        .password = getenv("DB_PASSWORD"),
+    };
 
     var conn = try hefa.Connection.init(&settings);
     defer conn.deinit();
@@ -21,19 +29,19 @@ test "Hefallump\n" {
     var cur = conn.cursor();
     defer cur.deinit();
 
-    try cur.execute("drop table if exists Cars;", .{});
+    try cur.execute("DROP TABLE IF EXISTS Cars;", .{});
     try cur.execute(
-        \\create table if not exists Cars(
-        \\  id integer primary key,
-        \\  name varchar(20),
-        \\ price int
+        \\CREATE TABLE IF NOT EXISTS Cars(
+        \\  id      INTEGER PRIMARY KEY,
+        \\  name    VARCHAR(20),
+        \\  price   INTEGER
         \\);
     , .{});
-    try cur.execute("insert into Cars values(1,'Gol',200)", .{});
-    try cur.execute("insert into Cars values(2,'Mercedes',57127)", .{});
-    try cur.execute("insert into Cars values(3,'Skoda',9000)", .{});
-    try cur.execute("insert into Cars values(4,'Volvo',29000)", .{});
-    try cur.execute("insert into Cars values(5,'BMW',78000)", .{});
+    try cur.execute("INSERT INTO CARS VALUES(1,'Gol',200)", .{});
+    try cur.execute("INSERT INTO CARS VALUES(2,'Mercedes',57127)", .{});
+    try cur.execute("INSERT INTO CARS VALUES(3,'Skoda',9000)", .{});
+    try cur.execute("INSERT INTO CARS VALUES(4,'Volvo',29000)", .{});
+    try cur.execute("INSERT INTO CARS VALUES(5,'BMW',78000)", .{});
 
     //
     // The rule is simple: kill the bitch (memory) after using
@@ -45,7 +53,7 @@ test "Hefallump\n" {
         price: usize,
     };
 
-    try cur.execute("select * from Cars", .{});
+    try cur.execute("SELECT * FROM Cars", .{});
     {
         var result = try cur.fetch(allocator, Car);
         defer result.deinit();
@@ -56,7 +64,7 @@ test "Hefallump\n" {
         }
     }
 
-    try cur.execute("select * from Cars where id = 1 or id = 4", .{});
+    try cur.execute("SELECT * FROM Cars WHERE id = 1 OR id = 4", .{});
     {
         var record = try cur.fetch(allocator, []const u8);
         defer record.deinit();
@@ -67,7 +75,7 @@ test "Hefallump\n" {
         }
     }
 
-    try cur.execute("select 1 + 1 + 1", .{});
+    try cur.execute("SELECT 1 + 1 + 1", .{});
     {
         var record = try cur.fetch(allocator, usize);
         defer record.deinit();
@@ -76,7 +84,7 @@ test "Hefallump\n" {
         std.debug.print("{}\n", .{data});
     }
 
-    try cur.execute("select * from Cars", .{});
+    try cur.execute("SELECT * FROM Cars", .{});
     {
         var iter = cur.fetchIter(allocator);
         while (try iter.next()) |row| {
