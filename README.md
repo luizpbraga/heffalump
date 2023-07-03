@@ -8,14 +8,14 @@ Looks like `psycopg`, but we have allocators
 
 ```zig
 const std = @import("std");
-const hefa = @import("heffalump.zig");
+const heffa = @import("heffalump.zig");
 const getenv = std.os.getenv;
 const expect = std.testing.expect;
 const allocator = std.testing.allocator;
 
 test "Hefallump" {
 
-    const settings = ConnectionSetting{
+    const settings = heffa.ConnectionSetting{
         .port = getenv("DB_PORT"),
         .user = getenv("DB_USER"),
         .host = getenv("DB_HOST"),
@@ -23,7 +23,7 @@ test "Hefallump" {
         .password = getenv("DB_PASSWORD"),
     };
 
-    var conn = try hefa.Connection.init(&settings);
+    var conn = try heffa.Connection.init(&settings);
     defer conn.deinit();
 
     var cur = conn.cursor();
