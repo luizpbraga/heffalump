@@ -7,18 +7,19 @@ Looks like `psycopg`, but we have allocators
 ### Example
 
 ```zig
-const std = @impot("std");
-const heffalump = @impot("heffalump");
+const std = @import("std");
+const hefa = @import("heffalump.zig");
+const expect = std.testing.expect;
 
-test "Heffalump" {
+test "Hefallump\n" {
     const allocator = std.testing.allocator;
-    const settings = heffalump.ConnectionSetting{};
+    const settings = hefa.ConnectionSetting{};
 
-    var conn = try heffalump.Connection.init(&settings);
-    defer conn.close();
+    var conn = try hefa.Connection.init(&settings);
+    defer conn.deinit();
 
     var cur = conn.cursor();
-    defer cur.close();
+    defer cur.deinit();
 
     try cur.execute("drop table if exists Cars;", .{});
     try cur.execute(
@@ -35,24 +36,44 @@ test "Heffalump" {
     try cur.execute("insert into Cars values(5,'BMW',78000)", .{});
 
     //
-    // The rule is simple: kill the bitch after using
+    // The rule is simple: kill the bitch (memory) after using
     //
+
+    const Car = struct {
+        id: usize,
+        name: []const u8,
+        price: usize,
+    };
 
     try cur.execute("select * from Cars", .{});
     {
-        var record = try cur.fetchAll(allocator);
+        var result = try cur.fetch(allocator, Car);
+        defer result.deinit();
+
+        for (result.data) |car| {
+            try expect(@TypeOf(car) == Car);
+            std.debug.print("id: {}, name: {s}, price: ${}\n", .{ car.id, car.name, car.price });
+        }
+    }
+
+    try cur.execute("select * from Cars where id = 1 or id = 4", .{});
+    {
+        var record = try cur.fetch(allocator, []const u8);
         defer record.deinit();
         const rows = record.data;
-        for (rows) |row|
-            std.debug.print("{s}\n", .{row});
+        for (rows, 0..) |row, i| {
+            try expect(@TypeOf(row) == []const []const u8);
+            std.debug.print("row {}:  {s}\n", .{ i, row });
+        }
     }
 
     try cur.execute("select 1 + 1 + 1", .{});
     {
-        var record = try cur.fetchAll(allocator);
+        var record = try cur.fetch(allocator, usize);
         defer record.deinit();
         const data = record.data[0][0];
-        std.debug.print("{s}\n", .{data});
+        try expect(@TypeOf(data) == usize);
+        std.debug.print("{}\n", .{data});
     }
 
     try cur.execute("select * from Cars", .{});
@@ -64,4 +85,5 @@ test "Heffalump" {
         }
     }
 }
+
 ```
