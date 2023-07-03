@@ -1,8 +1,14 @@
 const std = @import("std");
 
-pub fn build(b: *std.Build) void {
+pub fn build(b: *std.Build) !void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+
+    const heffalump = b.createModule(.{
+        .source_file = .{ .path = "src/heffalump.zig" },
+    });
+
+    try b.modules.put(b.dupe("heffalump"), heffalump);
 
     const lib = b.addStaticLibrary(.{
         .name = "heffalump",
