@@ -150,8 +150,10 @@ pub const Cursor = struct {
             else => {
                 if (std.meta.trait.isZigString(T))
                     return data;
+
                 if (std.meta.trait.isSlice(T))
                     return error.NotImplemented;
+
                 return data;
             },
         };
@@ -217,6 +219,17 @@ pub const Cursor = struct {
             .data = try table.toOwnedSlice(),
             .allocator = allocator,
         };
+    }
+
+    pub fn fetchTuple(self: *Cursor, allocator: std.mem.Allocator, comptime T: type) !Result2(T) {
+        _ = allocator;
+        _ = self;
+        @compileError("Not Implemented");
+    }
+    pub fn fetchArray(self: *Cursor, allocator: std.mem.Allocator, comptime T: type) !Result2(T) {
+        _ = allocator;
+        _ = self;
+        @compileError("Not Implemented");
     }
 
     pub fn fetch(self: *Cursor, allocator: std.mem.Allocator, comptime T: type) !Result2(T) {
