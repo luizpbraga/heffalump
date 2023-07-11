@@ -4,17 +4,55 @@ Looks like `psycopg`, but we have allocators
 
 ![Heffalump](./zzheffalump.jpg "Separados ao nascer")
 
+### Build
+
+In your `build.zig` add
+```zig
+pub fn build(b: *std.Build) !void {
+    //...
+    const heffalump = b.dependency("heffalump", .{
+            .target = target,
+            .optimize = optimize,
+        });
+
+        exe.addModule("heffalump", heffalump.module("heffalump"));
+        exe.linkLibrary(heffalump.artifact("heffalump"));
+        
+    // ...
+        b.installArtifact(exe);
+```
+
+and the `build.zig.zon` should look like this
+```
+.{
+    // ...
+    .dependencies = .{
+        // ...
+        .heffalump = .{
+            .url = "https://github.com/luizpbraga/heffalump/archive/refs/tags/v0.0.1.tar.gz",
+            .hash = "122043f5d763462a23e11375f2d5938ad41651aad6e9c3b2f688f07be81ee59f1390",
+        },
+    }
+}
+
+```
+
+then run `zig build`.
+
 ### Example
 
 ```zig
 const std = @import("std");
-const heffa = @import("heffalump.zig");
+const heffa = @import("heffalump"); // no '.zig' here
 const getenv = std.os.getenv;
 const expect = std.testing.expect;
 const allocator = std.testing.allocator;
 
-test "Hefallump" {
+test "Hefallump test" {
 
+    //
+    // Database settings
+    //
     const settings = heffa.ConnectionSetting{
         .port = getenv("DB_PORT"),
         .user = getenv("DB_USER"),
@@ -23,12 +61,21 @@ test "Hefallump" {
         .password = getenv("DB_PASSWORD"),
     };
 
+    //
+    // Start the connection
+    //
     var conn = try heffa.Connection.init(&settings);
     defer conn.deinit();
 
+    //
+    // Start the cursor
+    //
     var cur = conn.cursor();
     defer cur.deinit();
 
+    //
+    // let's run some queries
+    //
     try cur.execute("DROP TABLE IF EXISTS Cars;", .{});
     try cur.execute(
         \\CREATE TABLE IF NOT EXISTS Cars(
