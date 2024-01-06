@@ -1,4 +1,4 @@
-# Heffalump 
+# Heffalump
 
 Looks like `psycopg`, but we have allocators
 
@@ -7,6 +7,7 @@ Looks like `psycopg`, but we have allocators
 ### Build
 
 In your `build.zig` add
+
 ```zig
 pub fn build(b: *std.Build) !void {
     //...
@@ -17,12 +18,15 @@ pub fn build(b: *std.Build) !void {
 
         exe.addModule("heffalump", heffalump.module("heffalump"));
         exe.linkLibrary(heffalump.artifact("heffalump"));
-        
+
     // ...
         b.installArtifact(exe);
+    // ...
+}
 ```
 
 and the `build.zig.zon` should look like this
+
 ```
 .{
     // ...
@@ -49,7 +53,6 @@ const expect = std.testing.expect;
 const allocator = std.testing.allocator;
 
 test "Hefallump test" {
-
     //
     // Database settings
     //
@@ -60,85 +63,31 @@ test "Hefallump test" {
         .dbname = getenv("DB_NAME"),
         .password = getenv("DB_PASSWORD"),
     };
+    const dsn = settings.parse()
 
     //
-    // Start the connection
+    // Start The Connection
     //
-    var conn = try heffa.Connection.init(&settings);
+    var conn = try heffa.Connection.init(allocator, dsn);
     defer conn.deinit();
 
     //
-    // Start the cursor
+    // Fetch Some Data
     //
-    var cur = conn.cursor();
-    defer cur.deinit();
-
-    //
-    // let's run some queries
-    //
-    try cur.execute("DROP TABLE IF EXISTS Cars;", .{});
-    try cur.execute(
-        \\CREATE TABLE IF NOT EXISTS Cars(
-        \\  id      INTEGER PRIMARY KEY,
-        \\  name    VARCHAR(20),
-        \\  price   INTEGER
-        \\);
-    , .{});
-    try cur.execute("INSERT INTO CARS VALUES(1,'Gol',200)", .{});
-    try cur.execute("INSERT INTO CARS VALUES(2,'Mercedes',57127)", .{});
-    try cur.execute("INSERT INTO CARS VALUES(3,'Skoda',9000)", .{});
-    try cur.execute("INSERT INTO CARS VALUES(4,'Volvo',29000)", .{});
-    try cur.execute("INSERT INTO CARS VALUES(5,'BMW',78000)", .{});
+    var result = try conn.exec("SELECT * FROM cars", .{});
+    defer result.deinit();
 
     //
-    // The rule is simple: kill the bitch (memory) after using
+    // Iterate Over The Data
     //
+    var rows = result.rows(ally);
+    while (rows.next()) |row| {
+        var id: u8 = undefined;
+        var price: usize = undefined;
+        var name: []const u8 = undefined;
+        try row.scan(.{ &id, &name, &price });
 
-    const Car = struct {
-        id: usize,
-        name: []const u8,
-        price: usize,
-    };
-
-    try cur.execute("SELECT * FROM Cars", .{});
-    {
-        var result = try cur.fetch(allocator, Car);
-        defer result.deinit();
-
-        for (result.data) |car| {
-            try expect(@TypeOf(car) == Car);
-            std.debug.print("id: {}, name: {s}, price: ${}\n", .{ car.id, car.name, car.price });
-        }
-    }
-
-    try cur.execute("SELECT * FROM Cars WHERE id = 1 OR id = 4", .{});
-    {
-        var record = try cur.fetch(allocator, []const u8);
-        defer record.deinit();
-        const rows = record.data;
-        for (rows, 0..) |row, i| {
-            try expect(@TypeOf(row) == []const []const u8);
-            std.debug.print("row {}:  {s}\n", .{ i, row });
-        }
-    }
-
-    try cur.execute("SELECT 1 + 1 + 1", .{});
-    {
-        var record = try cur.fetch(allocator, usize);
-        defer record.deinit();
-        const data = record.data[0][0];
-        try expect(@TypeOf(data) == usize);
-        std.debug.print("{}\n", .{data});
-    }
-
-    try cur.execute("SELECT * FROM Cars", .{});
-    {
-        var iter = cur.fetchIter(allocator);
-        while (try iter.next()) |row| {
-            defer allocator.free(row);
-            std.debug.print("{s}\n", .{row});
-        }
+        std.debug.print("id: {}, name: {s}, price: {}\n", .{ id, name, price });
     }
 }
-
 ```

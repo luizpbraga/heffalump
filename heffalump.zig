@@ -224,7 +224,6 @@ pub const Result = struct {
 pub const Connection = struct {
     /// DO NOT USE THIS POINTER
     pq_conn: *c.PGconn,
-
     allocator: std.mem.Allocator,
 
     pub const Error = error{
