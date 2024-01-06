@@ -106,8 +106,9 @@ fn execWithoutArgs(conn: *Connection, query: []const u8) !Result {
 }
 
 fn checkResult(conn: *Connection, pq_res: ?*c.PGresult) !void {
-    if (c.PQresultStatus(pq_res) != c.PGRES_TUPLES_OK or c.PQresultStatus(pq_res) != c.PGRES_COMMAND_OK) {
-        std.log.err("PQerrorMessage: {s} {}\n", .{ c.PQerrorMessage(conn.pq_conn), conn.status() });
+    const _status = c.PQresultStatus(pq_res);
+    if (_status != c.PGRES_TUPLES_OK and _status != c.PGRES_COMMAND_OK) {
+        std.log.err("PQerrorMessage: {s} {}\n", .{ c.PQerrorMessage(conn.pq_conn), _status });
         return error.QueryFailed;
     }
 }
