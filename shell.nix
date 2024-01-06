@@ -1,4 +1,4 @@
 { pkgs ? import <nixpkgs> {} }:
   pkgs.mkShell {
-    nativeBuildInputs = with pkgs.buildPackages; [ postgresql_15 ];
+    nativeBuildInputs = with pkgs.buildPackages; [ postgresql_16 ];
 }
