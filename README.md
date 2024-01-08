@@ -48,27 +48,18 @@ then run `zig build`.
 ```zig
 const std = @import("std");
 const heffa = @import("heffalump"); // no '.zig' here
-const getenv = std.os.getenv;
-const expect = std.testing.expect;
-const allocator = std.testing.allocator;
+const ally = std.testing.allocator;
 
 test "Hefallump test" {
     //
     // Database settings
     //
-    const settings = heffa.ConnectionSetting{
-        .port = getenv("DB_PORT"),
-        .user = getenv("DB_USER"),
-        .host = getenv("DB_HOST"),
-        .dbname = getenv("DB_NAME"),
-        .password = getenv("DB_PASSWORD"),
-    };
-    const dsn = settings.parse()
+    const dsn = "user=postgres password=postgres dbname=testdb host=localhost";
 
     //
     // Start The Connection
     //
-    var conn = try heffa.Connection.init(allocator, dsn);
+    var conn = try heffa.Connection.init(ally, dsn);
     defer conn.deinit();
 
     //
