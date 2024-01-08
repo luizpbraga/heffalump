@@ -62,8 +62,8 @@ pub const Row = struct {
                 if (@typeInfo(T) != .Struct) {
                     return error.ExpectStruct;
                 }
-                const alloc = @constCast(row).allocator;
-                break :v try std.json.parseFromSliceLeaky(T, alloc, value, .{});
+                var arena = std.heap.ArenaAllocator.init(row.allocator);
+                break :v try std.json.parseFromSliceLeaky(T, arena.allocator(), value, .{});
             },
         };
 
@@ -81,42 +81,45 @@ pub const Row = struct {
         }
     }
 
+    /// TODO: fix this
+    pub fn get(row: *const Row, comptime T: type, idx_or_name: anytype) !T {
+        const K = @TypeOf(idx_or_name);
+
+        const idx = if (K == usize or K == comptime_int)
+            idx_or_name
+        else if (K == []const u8 or (@typeInfo(@TypeOf(idx_or_name)) == .Pointer)) b: {
+            const name = idx_or_name;
+            const col = row.res.colNumber(name) orelse return error.UnkowColumnName;
+            break :b col;
+        } else return error.GetError;
+
+        const value = row.res.getValue(row.current_row, idx).?;
+        return try row.as(T, value);
+    }
+
     /// Scans a the struct fields and parse it.
-    pub fn scanType(row: *const Row, comptime T: type) !T {
-        const t: T = undefined;
+    /// THIS IS BROKEN!!!! I DONT KNOW WHY
+    pub fn from(row: *const Row, comptime T: type) !T {
+        var t: T = undefined;
 
-        // runtime: vetor de nomes
-        // runtime: vetor de colunas
-        // runtime: vetor de valores
-
-        const fields = std.meta.fields(T);
-
-        const names, const types = comptime b: {
-            var names: [fields.len][]const u8, var types: [fields.len]type = .{ undefined, undefined };
-            for (std.meta.fields(T), 0..) |field, i| {
-                names[i] = field.name;
-                types[i] = field.type;
-            }
-            break :b .{ names, types };
-        };
-
-        _ = types;
-
-        var values = try row.allocator.alloc([]const u8, names.len);
-        defer row.allocator.free(values);
-
-        for (names, 0..) |name, i| {
-            const col = row.res.colNumber(name).?;
-            values[i] = row.res.getValue(row.current_row, col).?;
+        inline for (std.meta.fields(T)) |field| {
+            const name = field.name;
+            const Ftype = field.type;
+            @field(t, name) = try row.get(Ftype, name);
         }
-
-        // inline for (std.meta.fields(T), 0..) |field, i| {
-        //     const name = field.name;
-        //     const col = row.res.colNumber(name).?;
-        //     const value = row.res.getValue(row.current_row, col).?;
-        //     @field(t, name) = try row.as(field.type, value);
-        // }
 
         return t;
     }
 };
+
+// THIS API IS DOPE AF
+// const conn = ...
+//
+// const res = try conn.exec(...)
+// defer res.deinit()
+//
+// for (res.rows) |row| {
+//     const car = row.from(Car);
+//     ...
+// }
+//

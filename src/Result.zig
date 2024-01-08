@@ -176,3 +176,25 @@ pub fn status(res: *Result) Status {
         else => unreachable,
     };
 }
+
+/// TODO: missing allocator field
+pub fn getRow(result: *Result, row_number: usize) !Rows.Row {
+    if (row_number >= result.nRows()) return error.InvalidRowNumber;
+
+    return .{
+        .res = result,
+        .current_row = row_number,
+        .max_col_number = result.nCols(),
+        .allocator = undefined,
+    };
+}
+
+/// TODO: missing allocator field
+pub fn getFirstRow(result: *Result) !Rows.Row {
+    return .{
+        .res = result,
+        .current_row = 0,
+        .max_col_number = result.nCols(),
+        .allocator = undefined,
+    };
+}

@@ -11,6 +11,23 @@ pub const Connection = @This();
 pq_conn: *c.PGconn,
 allocator: std.mem.Allocator,
 
+pub const Info = struct {
+    password: []const u8 = "postgres",
+    dbname: []const u8 = "testdb",
+    user: []const u8 = "postgres",
+    host: []const u8 = "localhost",
+    port: []const u8 = "5432",
+
+    fn parse(login: *const Info, ally: std.mem.Allocator) ![]const u8 {
+        return try std.fmt.allocPrint(ally, "user={s} dbname={s} password={s} host={s} port={s}", .{ login.user, login.dbname, login.password, login.host, login.port });
+    }
+};
+
+pub const Settings = union(enum) {
+    string: []const u8,
+    info: Info,
+};
+
 pub const Error = error{
     ConnectionFailed,
     SomeError,
@@ -58,22 +75,54 @@ pub fn init(allocator: std.mem.Allocator, conn_info: []const u8) Error!Connectio
     };
 }
 
+/// BUG
+pub fn init2(allocator: std.mem.Allocator, settings: Settings) (Error || std.fmt.AllocPrintError)!Connection {
+    const dsn = switch (settings) {
+        .string => |conn_string| conn_string,
+        .info => |info| try info.parse(allocator),
+    };
+
+    std.debug.print("\n{s}\n", .{dsn});
+
+    defer if (settings == .info) {
+        allocator.free(dsn);
+    };
+
+    const pq_conn = c.PQconnectdb(dsn.ptr) orelse return error.BadConnection;
+    errdefer c.PQfinish(pq_conn);
+
+    if (c.PQstatus(pq_conn) != c.CONNECTION_OK) {
+        std.log.err("Connection Error: {s}", .{c.PQerrorMessage(pq_conn)});
+        return error.ConnectionFailed;
+    }
+
+    return .{
+        .allocator = allocator,
+        .pq_conn = pq_conn,
+    };
+}
+
+/// NOT TESTED
 pub fn begin(conn: *Connection) !void {
     try conn.run("BEGIN", .{});
 }
 
+/// NOT TESTED
 pub fn end(conn: *Connection) !void {
     try conn.run("END", .{});
 }
 
+/// NOT TESTED
 pub fn rollBack(conn: *Connection) !void {
     try conn.run("ROLLBACK", .{});
 }
 
+/// NOT TESTED
 pub fn commit(conn: *Connection) !void {
     try conn.run("COMMIT", .{});
 }
 
+/// NOT TESTED
 /// TODO: create a Stransaction struct with a status enum
 pub fn transactionsStatus(conn: *Connection) usize {
     const tx_status = c.PQtransactionStatus(conn.pq_conn);
@@ -104,7 +153,7 @@ pub fn status(conn: *Connection) Status {
     };
 }
 
-fn execWithoutArgs(conn: *Connection, query: []const u8) !Result {
+fn execNoParams(conn: *Connection, query: []const u8) !Result {
     const pq_res = c.PQexec(conn.pq_conn, query.ptr);
     errdefer c.PQclear(pq_res);
 
@@ -115,7 +164,7 @@ fn execWithoutArgs(conn: *Connection, query: []const u8) !Result {
     };
 }
 
-fn checkResult(conn: *Connection, pq_res: ?*c.PGresult) !void {
+pub fn checkResult(conn: *Connection, pq_res: ?*c.PGresult) !void {
     const _status = c.PQresultStatus(pq_res);
     if (_status != c.PGRES_TUPLES_OK and _status != c.PGRES_COMMAND_OK) {
         std.log.err("PQerrorMessage: {s} {}\n", .{ c.PQerrorMessage(conn.pq_conn), _status });
@@ -123,22 +172,51 @@ fn checkResult(conn: *Connection, pq_res: ?*c.PGresult) !void {
     }
 }
 
-fn execWithArgs(conn: *Connection, query: []const u8, query_args: anytype) !Result {
-    const data = try conn.allocator.alloc([*c]const u8, query_args.len);
-    defer conn.allocator.free(data);
+/// Executes using Binary Format. args in query_args may be int, float, string, etc
+pub fn execBin(conn: *Connection, query: []const u8, query_args: anytype) !Result {
+    const len = query_args.len;
+    const param_types = null;
+    const param_formats: [len]c_int = .{1} ** len;
+    var param_lenghts: [len]c_int = undefined;
+    var params_values: [len][*]const u8 = undefined;
 
-    inline for (query_args, 0..) |arg, i| {
-        data[i] = arg;
+    inline for (query_args, &params_values, &param_lenghts) |arg, *d, *lenght| {
+        const ArgType = @TypeOf(arg);
+        const arg_type_info = @typeInfo(ArgType);
+
+        d.*, lenght.* = switch (arg_type_info) {
+            .Pointer => |info| .{
+                @ptrCast(arg),
+                @sizeOf(@typeInfo(info.child).Array.child) * @typeInfo(info.child).Array.len,
+            },
+            .Bool => .{
+                @ptrCast(&arg),
+                @sizeOf(ArgType),
+            },
+            .Int, .Float => .{
+                @ptrCast(&std.mem.bigToNative(ArgType, arg)),
+                @sizeOf(ArgType),
+            },
+            .ComptimeInt => .{
+                @ptrCast(&std.mem.bigToNative(i32, arg)),
+                @sizeOf(i32),
+            },
+            .ComptimeFloat => .{
+                @ptrCast(&std.mem.bigToNative(f32, arg)),
+                @sizeOf(f64),
+            },
+            else => return error.TypeNotSupportedAsParameter,
+        };
     }
 
     const pq_res = c.PQexecParams(
         conn.pq_conn,
         query.ptr,
         query_args.len,
-        null,
-        data.ptr,
-        null, // lengths
-        null, // format
+        param_types,
+        &params_values,
+        &param_lenghts,
+        &param_formats,
         0, // txt format
     );
     errdefer c.PQclear(pq_res);
@@ -150,20 +228,49 @@ fn execWithArgs(conn: *Connection, query: []const u8, query_args: anytype) !Resu
     };
 }
 
+fn execParams(conn: *Connection, query: []const u8, query_args: anytype) !Result {
+    const len = query_args.len;
+    var params_values: [len][*]const u8 = undefined;
+
+    inline for (&params_values, query_args) |*value, arg| {
+        value.* = @alignCast(@ptrCast(arg));
+    }
+
+    const pq_res = c.PQexecParams(
+        conn.pq_conn,
+        query.ptr,
+        query_args.len,
+        null, // &param_types,
+        &params_values,
+        null, //param_lenghts, // lengths
+        null, //param_formats, // format
+        1, // txt format
+    );
+    errdefer c.PQclear(pq_res);
+
+    try conn.checkResult(pq_res);
+
+    return .{
+        .pq_res = pq_res.?,
+    };
+}
+
 /// Executes a query. The memory allocated by exec will be free when deinit is called
+/// Only string data
 pub fn exec(conn: *Connection, query: []const u8, query_args: anytype) !Result {
     errdefer conn.deinit();
 
     // PQescapeStringConn and PQescapeByteaConn: These functions are used to escape and properly handle strings and bytea data for safe use in SQL queries, preventing SQL injection attacks.
     // const q = c.PQescapeStringConn(conn.pq_conn, query.ptr, query.len);
     if (query_args.len == 0) {
-        return try conn.execWithoutArgs(query);
+        return try conn.execNoParams(query);
     }
 
-    return try conn.execWithArgs(query, query_args);
+    return try conn.execParams(query, query_args);
 }
 
 /// Same as `exec`, but no Result is returned
+/// Only string data
 pub fn run(conn: *Connection, query: []const u8, query_args: anytype) !void {
     var result = try conn.exec(query, query_args);
     try result.checkStatus();
@@ -177,20 +284,20 @@ pub fn prepare(conn: *Connection, stmt_name: []const u8, query: []const u8, n_pa
     c.PQclear(prepare_pq_res);
 }
 
-/// Executes a prepared query
-pub fn execPrepared(conn: *Connection, stmt_name: []const u8, params_values: []const []const u8) !Result {
-    const data = try conn.allocator.alloc([*c]const u8, params_values.len);
-    defer conn.allocator.free(data);
+/// Executes a prepared query. Only string data
+/// Only string data
+pub fn execPrepared(conn: *Connection, stmt_name: []const u8, query_args: anytype) !Result {
+    var data: [query_args.len][*]const u8 = undefined;
 
-    for (params_values, 0..) |arg, i| {
-        data[i] = arg.ptr;
+    inline for (query_args, 0..) |arg, i| {
+        data[i] = arg;
     }
 
     const pq_res = c.PQexecPrepared(
         conn.pq_conn,
         stmt_name.ptr,
-        @intCast(params_values.len),
-        data.ptr,
+        @intCast(query_args.len),
+        &data,
         null,
         null,
         0,
