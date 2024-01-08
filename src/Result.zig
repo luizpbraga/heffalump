@@ -1,6 +1,7 @@
 const std = @import("std");
 const c = @cImport(@cInclude("libpq-fe.h"));
 const Rows = @import("Rows.zig");
+const oid = @import("./oid.zig");
 
 pub const PGResult = c.PGresult;
 pub const PGConnection = c.PGconn;
@@ -9,6 +10,13 @@ pub const Result = @This();
 
 /// DO NOT USE THIS POINTER
 pq_res: *PGResult,
+
+pub const Ping = enum(u8) {
+    ok,
+    reject,
+    no_response,
+    no_attempt,
+};
 
 pub const Status = enum {
     tuples_ok,
@@ -26,6 +34,7 @@ pub const Status = enum {
     nonfatal_error,
 };
 
+/// TODO: implove it
 pub const Error = error{
     QueryFailed,
 };
@@ -52,31 +61,69 @@ pub fn nRows(res: *Result) usize {
     return @intCast(c.PQntuples(res.pq_res));
 }
 
-pub fn nCols(result: *Result) usize {
+pub fn nCols(result: *const Result) usize {
     return @intCast(c.PQnfields(result.pq_res));
 }
 
-pub fn colName(result: *Result, col_number: usize) []const u8 {
+pub fn nParams(result: *const Result) usize {
+    return @intCast(c.PQnparams(result.pq_res));
+}
+
+pub fn user(result: *const Result) ?[]const u8 {
+    const user_str = std.mem.span(c.PQuser(result.pq_res));
+    return if (user_str.len == 0) null else user_str;
+}
+
+pub fn port(result: *const Result) ?[]const u8 {
+    const port_str = std.mem.span(c.PQport(result.pq_res));
+    if (port_str.len == 0) null else port_str;
+}
+
+pub fn ping(result: *const Result) Ping {
+    return @enumFromInt(c.PQping(result.pq_res));
+}
+
+pub fn host(result: *const Result) ?[]const u8 {
+    const host_str = std.mem.span(c.PQhost(result.pq_res));
+    return if (host_str.len == 0) null else host_str;
+}
+
+pub fn db(result: *const Result) ?[]const u8 {
+    const db_str = std.mem.span(c.PQdb(result.pq_res));
+    return if (db_str.len == 0) null else db_str;
+}
+
+pub fn pass(result: *const Result) usize {
+    return std.mem.span(c.PQpass(result.pq_res));
+}
+
+pub fn reset(result: *const Result) void {
+    c.PQreset(result.pq_res);
+}
+
+pub fn colName(result: *const Result, col_number: usize) []const u8 {
     const c_col_number: c_int = @intCast(col_number);
     return std.mem.span(c.PQfname(result.pq_res, c_col_number));
 }
 
-pub fn colNumber(result: *Result, col_name: []const u8) ?usize {
+/// BUG: Why is col_name.ptr SO CRAZY???
+pub fn colNumber(result: *const Result, col_name: []const u8) ?usize {
     const col = c.PQfnumber(result.pq_res, col_name.ptr);
     return if (col == -1) null else @intCast(col);
 }
 
-pub fn colType(result: *Result, col_number: usize) usize {
+pub fn colType(result: *const Result, col_number: usize) oid.Oid {
     const c_col_number: c_int = @intCast(col_number);
-    return @intCast(c.PQftype(result.pq_res, c_col_number));
+    const i = c.PQftype(result.pq_res, c_col_number);
+    return @enumFromInt(i);
 }
 
-pub fn colTypeName(result: *Result, col_number: usize) []const u8 {
+pub fn colTypeName(result: *const Result, col_number: usize) []const u8 {
     const c_col_number: c_int = @intCast(col_number);
     return @intCast(c.PQftypeName(result.pq_res, c_col_number));
 }
 
-pub fn printResult(result: *Result) void {
+pub fn printResult(result: *const Result) void {
     const n_col = result.nCols();
     const n_row = result.nRows();
 

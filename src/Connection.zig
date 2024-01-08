@@ -63,7 +63,7 @@ pub fn begin(conn: *Connection) !void {
 }
 
 pub fn end(conn: *Connection) !void {
-    try conn.run("end", .{});
+    try conn.run("END", .{});
 }
 
 pub fn rollBack(conn: *Connection) !void {
@@ -74,9 +74,19 @@ pub fn commit(conn: *Connection) !void {
     try conn.run("COMMIT", .{});
 }
 
+/// TODO: create a Stransaction struct with a status enum
+pub fn transactionsStatus(conn: *Connection) usize {
+    const tx_status = c.PQtransactionStatus(conn.pq_conn);
+    return @intCast(tx_status);
+}
+
 /// free the memory associated to the Connection
 pub fn deinit(conn: *Connection) void {
     c.PQfinish(conn.pq_conn);
+}
+
+pub fn lastErrorMsg(conn: *Connection) []const u8 {
+    return std.mem.span(c.PQerrorMessage(conn.pq_conn));
 }
 
 /// see PQstatus
@@ -129,7 +139,7 @@ fn execWithArgs(conn: *Connection, query: []const u8, query_args: anytype) !Resu
         data.ptr,
         null, // lengths
         null, // format
-        0,
+        0, // txt format
     );
     errdefer c.PQclear(pq_res);
 
@@ -144,6 +154,8 @@ fn execWithArgs(conn: *Connection, query: []const u8, query_args: anytype) !Resu
 pub fn exec(conn: *Connection, query: []const u8, query_args: anytype) !Result {
     errdefer conn.deinit();
 
+    // PQescapeStringConn and PQescapeByteaConn: These functions are used to escape and properly handle strings and bytea data for safe use in SQL queries, preventing SQL injection attacks.
+    // const q = c.PQescapeStringConn(conn.pq_conn, query.ptr, query.len);
     if (query_args.len == 0) {
         return try conn.execWithoutArgs(query);
     }
@@ -156,4 +168,34 @@ pub fn run(conn: *Connection, query: []const u8, query_args: anytype) !void {
     var result = try conn.exec(query, query_args);
     try result.checkStatus();
     defer result.deinit();
+}
+
+/// Prepares a query;
+pub fn prepare(conn: *Connection, stmt_name: []const u8, query: []const u8, n_params: usize) !void {
+    const prepare_pq_res = c.PQprepare(conn.pq_conn, stmt_name.ptr, query.ptr, @intCast(n_params), null);
+    try conn.checkResult(prepare_pq_res);
+    c.PQclear(prepare_pq_res);
+}
+
+/// Executes a prepared query
+pub fn execPrepared(conn: *Connection, stmt_name: []const u8, params_values: []const []const u8) !Result {
+    const data = try conn.allocator.alloc([*c]const u8, params_values.len);
+    defer conn.allocator.free(data);
+
+    for (params_values, 0..) |arg, i| {
+        data[i] = arg.ptr;
+    }
+
+    const pq_res = c.PQexecPrepared(
+        conn.pq_conn,
+        stmt_name.ptr,
+        @intCast(params_values.len),
+        data.ptr,
+        null,
+        null,
+        0,
+    );
+    try conn.checkResult(pq_res);
+
+    return .{ .pq_res = pq_res.? };
 }
