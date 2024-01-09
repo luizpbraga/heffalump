@@ -44,6 +44,45 @@ test "Connection and append data" {
     , .{});
 }
 
+test "Transactions: rollBack" {
+    var conn = try heffa.Connection.init(ally, DSN);
+    defer conn.deinit();
+
+    var tx = try conn.beginTx();
+    defer tx.commit() catch unreachable;
+
+    try tx.run(
+        \\INSERT INTO cars (name, price) VALUES
+        \\  ('HB20', 70000)
+    , .{});
+
+    // if some shit happened
+    if (true) try conn.rollBack();
+}
+
+// exit(1) sucks!!!
+// test "Transactions: Fail" {
+//     var conn = try heffa.Connection.init(ally, DSN);
+//     defer conn.deinit();
+//
+//     var tx = try conn.beginTx();
+//     // defer tx.commit() catch unreachable;
+//
+//     try tx.run(
+//         \\INSERT INTO cars (name, price) VALUES
+//         \\  ('HB20', 70000)
+//     , .{});
+//
+//     // if some shit happened, the tx is auto 'roll backed'.
+//     // This mean that the command above will not be commited
+//     tx.run(
+//         \\INSERT INTO cars (name, price) VALUES
+//         \\  ('PASSAT', 300), <= some dummy typo
+//     , .{}) catch |err| {
+//         try std.testing.expect(err == error.QueryFailed);
+//     };
+// }
+
 test "Fetch data: row.scan(.{...})" {
     var conn = try heffa.Connection.init(ally, DSN);
     defer conn.deinit();
@@ -130,11 +169,11 @@ test "Prepare query" {
     try std.testing.expect(res.nRows() == N_ROWS);
 }
 
-test "update query" {
+test "Update query" {
     var conn = try heffa.Connection.init(ally, DSN);
     defer conn.deinit();
 
-    const query = "INSERT INTO cars (name, price) VALUES ($1, $2)";
+    const query = "insert into cars (name, price) values ($1, $2)";
     const values = .{
         "Savero",
         "322",
@@ -158,6 +197,7 @@ test "insert query: binary format" {
     try conn.run("DELETE FROM cars WHERE id >= 6", .{});
 }
 
+// BUG
 // test "Fetch data: row.from(.{...})" {
 //     var conn = try heffa.Connection.init(ally, DSN);
 //     defer conn.deinit();
