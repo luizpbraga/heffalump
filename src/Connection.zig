@@ -2,6 +2,7 @@ const std = @import("std");
 const c = @cImport(@cInclude("libpq-fe.h"));
 const Rows = @import("Rows.zig");
 const Result = @import("Result.zig");
+const Transaction = @import("Transaction.zig");
 
 pub const PGResult = c.PGresult;
 pub const PGConnection = c.PGconn;
@@ -102,22 +103,25 @@ pub fn init2(allocator: std.mem.Allocator, settings: Settings) (Error || std.fmt
     };
 }
 
-/// NOT TESTED
+pub fn beginTx(conn: *Connection) !Transaction {
+    try conn.begin();
+    return .{
+        .conn = conn,
+    };
+}
+
 pub fn begin(conn: *Connection) !void {
     try conn.run("BEGIN", .{});
 }
 
-/// NOT TESTED
 pub fn end(conn: *Connection) !void {
     try conn.run("END", .{});
 }
 
-/// NOT TESTED
 pub fn rollBack(conn: *Connection) !void {
     try conn.run("ROLLBACK", .{});
 }
 
-/// NOT TESTED
 pub fn commit(conn: *Connection) !void {
     try conn.run("COMMIT", .{});
 }
@@ -167,7 +171,7 @@ fn execNoParams(conn: *Connection, query: []const u8) !Result {
 pub fn checkResult(conn: *Connection, pq_res: ?*c.PGresult) !void {
     const _status = c.PQresultStatus(pq_res);
     if (_status != c.PGRES_TUPLES_OK and _status != c.PGRES_COMMAND_OK) {
-        std.log.err("PQerrorMessage: {s} {}\n", .{ c.PQerrorMessage(conn.pq_conn), _status });
+        std.log.err("{s}", .{c.PQerrorMessage(conn.pq_conn)});
         return error.QueryFailed;
     }
 }
