@@ -6,15 +6,19 @@ pub fn build(b: *std.Build) void {
 
     const heffalump_mod = b.addModule("heffalump", .{
         .root_source_file = .{ .path = "src/heffalump.zig" },
+        .link_libc = true,
+        .target = target,
+        .optimize = optimize,
+    });
+
+    heffalump_mod.linkSystemLibrary("pq", .{
+        .needed = true,
     });
 
     const tests = b.addTest(.{
-        .root_source_file = .{ .path = "./test/test.zig" },
-        .target = target,
-        .optimize = optimize,
-        .link_libc = true,
+        .root_source_file = .{ .path = "test/test.zig" },
     });
-    tests.linkSystemLibrary("pq");
+
     tests.root_module.addImport("heffalump", heffalump_mod);
 
     const run_lib_unit_tests = b.addRunArtifact(tests);
