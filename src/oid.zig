@@ -1,4 +1,25 @@
 pub const Oid = enum(u16) {
+    pub fn toZigType(oid: *const Oid) !type {
+        return switch (oid.*) {
+            .bool => bool,
+            .char => u8,
+            .varbit => []const u1,
+            .text, .varchar, .json, .jsonb => []const u8,
+            .int2 => i16,
+            .int4 => i32,
+            .int8 => i64,
+            .float4 => f32,
+            .anyarray => []const u8,
+            .float8,
+            .numeric,
+            => f64,
+            .bit => u1,
+            .timestamp => []const u8,
+            .uuid => i128,
+            else => error.NotAValidZigType,
+        };
+    }
+
     bool = 16,
     bytea = 17,
     char = 18,

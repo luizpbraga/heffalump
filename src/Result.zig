@@ -3,13 +3,10 @@ const c = @cImport(@cInclude("libpq-fe.h"));
 const Rows = @import("Rows.zig");
 const oid = @import("./oid.zig");
 
-pub const PGResult = c.PGresult;
-pub const PGConnection = c.PGconn;
-
 pub const Result = @This();
 
 /// DO NOT USE THIS POINTER
-pq_res: *PGResult,
+pq_res: *c.PGresult,
 
 pub const Ping = enum(u8) {
     ok,

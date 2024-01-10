@@ -3,4 +3,4 @@ pub const Rows = @import("src/Rows.zig");
 pub const Result = @import("src/Result.zig");
 pub const Connection = @import("src/Connection.zig");
 
-pub fn main() !void {}
+pub fn main() void {}

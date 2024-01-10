@@ -3,6 +3,7 @@ const c = @cImport(@cInclude("libpq-fe.h"));
 const Rows = @import("Rows.zig");
 const Result = @import("Result.zig");
 const Transaction = @import("Transaction.zig");
+const Oid = @import("./oid.zig").Oid;
 
 pub const PGResult = c.PGresult;
 pub const PGConnection = c.PGconn;
@@ -18,9 +19,28 @@ pub const Info = struct {
     user: []const u8 = "postgres",
     host: []const u8 = "localhost",
     port: []const u8 = "5432",
+    // TODO:
+    sslmode: []const u8 = "",
+    hostaddr: []const u8 = "",
+    passfile: []const u8 = "",
+    keepalives: []const u8 = "",
+    application_name: []const u8 = "",
 
-    fn parse(login: *const Info, ally: std.mem.Allocator) ![]const u8 {
+    pub fn parseAlloc(login: *const Info, ally: std.mem.Allocator) ![]const u8 {
         return try std.fmt.allocPrint(ally, "user={s} dbname={s} password={s} host={s} port={s}", .{ login.user, login.dbname, login.password, login.host, login.port });
+    }
+
+    pub inline fn parse(comptime info: *const Info) []const u8 {
+        comptime {
+            const fields = std.meta.fields(Info);
+            var dsn: []const u8 = "";
+            for (fields) |field| {
+                const value = @field(info, field.name);
+                if (value.len == 0) continue;
+                dsn = dsn ++ std.fmt.comptimePrint("{s}={s} ", .{ field.name, value });
+            }
+            return dsn[0 .. dsn.len - 1];
+        }
     }
 };
 
@@ -77,16 +97,10 @@ pub fn init(allocator: std.mem.Allocator, conn_info: []const u8) Error!Connectio
 }
 
 /// BUG
-pub fn init2(allocator: std.mem.Allocator, settings: Settings) (Error || std.fmt.AllocPrintError)!Connection {
+pub fn init2(allocator: std.mem.Allocator, comptime settings: Settings) Error!Connection {
     const dsn = switch (settings) {
         .string => |conn_string| conn_string,
-        .info => |info| try info.parse(allocator),
-    };
-
-    std.debug.print("\n{s}\n", .{dsn});
-
-    defer if (settings == .info) {
-        allocator.free(dsn);
+        .info => |info| info.parse(),
     };
 
     const pq_conn = c.PQconnectdb(dsn.ptr) orelse return error.BadConnection;
@@ -176,62 +190,6 @@ pub fn checkResult(conn: *Connection, pq_res: ?*c.PGresult) !void {
     }
 }
 
-/// Executes using Binary Format. args in query_args may be int, float, string, etc
-pub fn execBin(conn: *Connection, query: []const u8, query_args: anytype) !Result {
-    const len = query_args.len;
-    const param_types = null;
-    const param_formats: [len]c_int = .{1} ** len;
-    var param_lenghts: [len]c_int = undefined;
-    var params_values: [len][*]const u8 = undefined;
-
-    inline for (query_args, &params_values, &param_lenghts) |arg, *d, *lenght| {
-        const ArgType = @TypeOf(arg);
-        const arg_type_info = @typeInfo(ArgType);
-
-        d.*, lenght.* = switch (arg_type_info) {
-            .Pointer => |info| .{
-                @ptrCast(arg),
-                @sizeOf(@typeInfo(info.child).Array.child) * @typeInfo(info.child).Array.len,
-            },
-            .Bool => .{
-                @ptrCast(&arg),
-                @sizeOf(ArgType),
-            },
-            .Int, .Float => .{
-                @ptrCast(&std.mem.bigToNative(ArgType, arg)),
-                @sizeOf(ArgType),
-            },
-            .ComptimeInt => .{
-                @ptrCast(&std.mem.bigToNative(i32, arg)),
-                @sizeOf(i32),
-            },
-            .ComptimeFloat => .{
-                @ptrCast(&std.mem.bigToNative(f32, arg)),
-                @sizeOf(f64),
-            },
-            else => return error.TypeNotSupportedAsParameter,
-        };
-    }
-
-    const pq_res = c.PQexecParams(
-        conn.pq_conn,
-        query.ptr,
-        query_args.len,
-        param_types,
-        &params_values,
-        &param_lenghts,
-        &param_formats,
-        0, // txt format
-    );
-    errdefer c.PQclear(pq_res);
-
-    try conn.checkResult(pq_res);
-
-    return .{
-        .pq_res = pq_res.?,
-    };
-}
-
 fn execParams(conn: *Connection, query: []const u8, query_args: anytype) !Result {
     const len = query_args.len;
     var params_values: [len][*]const u8 = undefined;
@@ -309,4 +267,95 @@ pub fn execPrepared(conn: *Connection, stmt_name: []const u8, query_args: anytyp
     try conn.checkResult(pq_res);
 
     return .{ .pq_res = pq_res.? };
+}
+
+/// Executes using Binary Format [ when possible :) ]. Args in query_args may be int, float, string, etc
+// WARNING: ALLOT OF COMPILE TIME CRAZINESS
+pub fn execBin(conn: *Connection, query: []const u8, query_args: anytype) !Result {
+    var arena = std.heap.ArenaAllocator.init(conn.allocator);
+    defer _ = arena.reset(.free_all);
+    const allocator = arena.allocator();
+
+    const len = query_args.len;
+    // default is bin format
+    var param_formats: [len]c_int = .{1} ** len;
+    // default is auto oid
+    var param_types: [len]c_uint = .{0} ** len;
+    var param_lenghts: [len]c_int = .{0} ** len;
+    var params_values: [len][*]const u8 = if (len == 0) .{} else undefined;
+
+    inline for (query_args, &params_values, &param_lenghts, 0..) |arg, *d, *lenght, i| {
+        const ArgType = @TypeOf(arg);
+        const arg_type_info = @typeInfo(ArgType);
+
+        // breaks when &1, etc
+        d.*, lenght.* = switch (arg_type_info) {
+            // STRINGS
+            .Pointer => |info| switch (@typeInfo(info.child)) {
+                .Array => |arr| .{
+                    @ptrCast(arg),
+                    @sizeOf(arr.child) * arr.len,
+                },
+                else => undefined,
+            },
+
+            // NOT BINARY FORMAT
+            .Array => |arr| b: {
+                param_formats[i] = 0;
+                const value = if (arr.child == []const u8)
+                    std.fmt.comptimePrint("{s}", .{arg})
+                else if (arr.child == @TypeOf(null))
+                    std.fmt.comptimePrint("{?}", .{arg})
+                else
+                    std.fmt.comptimePrint("{d}", .{arg});
+                break :b .{ value, 0 };
+            },
+
+            // TODO: USE BINARY FORMAT
+            .Null => b: {
+                param_formats[i] = 0;
+                const value = "null";
+                break :b .{ value, 0 };
+            },
+
+            // TODO: USE BINARY FORMAT, FIX RUNTIME VALUE
+            .Float, .ComptimeFloat => b: {
+                param_formats[i] = 0;
+                const v: []const u8 = try std.fmt.allocPrint(allocator, "{d}", .{arg});
+                break :b .{ v.ptr, 0 };
+            },
+
+            .Bool => .{ @ptrCast(&arg), @sizeOf(ArgType) },
+
+            .Int => .{
+                @ptrCast(&std.mem.bigToNative(ArgType, arg)),
+                @sizeOf(ArgType),
+            },
+
+            .ComptimeInt => .{
+                @ptrCast(&std.mem.bigToNative(i32, arg)),
+                @sizeOf(i32),
+            },
+
+            else => return error.TypeNotSupportedAsParameter,
+        };
+    }
+
+    const pq_res = c.PQexecParams(
+        conn.pq_conn,
+        query.ptr,
+        query_args.len,
+        &param_types,
+        &params_values,
+        &param_lenghts,
+        &param_formats,
+        0,
+    );
+    errdefer c.PQclear(pq_res);
+
+    try conn.checkResult(pq_res);
+
+    return .{
+        .pq_res = pq_res.?,
+    };
 }
