@@ -8,19 +8,6 @@ pub fn build(b: *std.Build) void {
         .root_source_file = .{ .path = "./heffalump.zig" },
     });
 
-    const exe = b.addExecutable(.{
-        .name = "heffalump",
-        .root_source_file = .{ .path = "heffalump.zig" },
-        .target = target,
-        .optimize = optimize,
-        .link_libc = true,
-    });
-    exe.linkSystemLibrary("pq");
-    exe.root_module.addImport("heffalump", heffalump_mod);
-
-    b.installArtifact(exe);
-
-    // TESTS
     const tests = b.addTest(.{
         .root_source_file = .{ .path = "./test/test.zig" },
         .target = target,
