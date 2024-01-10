@@ -1,28 +1,39 @@
-# Heffalump 
+# Heffalump
 
-Looks like `psycopg`, but we have allocators
+It's [`libpq`](https://www.postgresql.org/docs/current/libpq.html) but we have allocators (and no async). Please, don't use this module in production.
+
+The go is make _Postgres_ more comfortable for zig user, introducing a better style
+for `libpq` (no implicit _exit(1)_, God please). See the [examples](#example).
 
 ![Heffalump](./zzheffalump.jpg "Separados ao nascer")
 
 ### Build
 
-In your `build.zig` add
-```zig
-pub fn build(b: *std.Build) !void {
-    //...
-    const heffalump = b.dependency("heffalump", .{
-            .target = target,
-            .optimize = optimize,
-        });
+In your `build.zig`, add
 
-        exe.addModule("heffalump", heffalump.module("heffalump"));
-        exe.linkLibrary(heffalump.artifact("heffalump"));
-        
+```zig
+// ...
+pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
     // ...
-        b.installArtifact(exe);
+    const heffalump = b.dependency("heffalump", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // ...
+    const exe = b.addExecutable(.{
+        // you config
+    });
+    // link to you exe or test
+    exe.root_module.addImport("heffalump", heffalump.module("heffalump"));
+    exe.linkLibrary(heffalump.artifact("heffalump"));
+}
 ```
 
-and the `build.zig.zon` should look like this
+And the `build.zig.zon` should look like this
+
 ```
 .{
     // ...
@@ -37,108 +48,105 @@ and the `build.zig.zon` should look like this
 
 ```
 
-then run `zig build`.
+Then run `zig build`.
 
 ### Example
 
 ```zig
 const std = @import("std");
 const heffa = @import("heffalump"); // no '.zig' here
-const getenv = std.os.getenv;
-const expect = std.testing.expect;
-const allocator = std.testing.allocator;
+const ally = std.testing.allocator;
 
-test "Hefallump test" {
-
+test "Hefallump Examples" {
     //
     // Database settings
     //
-    const settings = heffa.ConnectionSetting{
-        .port = getenv("DB_PORT"),
-        .user = getenv("DB_USER"),
-        .host = getenv("DB_HOST"),
-        .dbname = getenv("DB_NAME"),
-        .password = getenv("DB_PASSWORD"),
-    };
+    const dsn = "user=postgres password=postgres dbname=testdb host=localhost";
 
     //
-    // Start the connection
+    // Start The Connection
     //
-    var conn = try heffa.Connection.init(&settings);
+    var conn = try heffa.Connection.init(ally, dsn);
     defer conn.deinit();
 
     //
-    // Start the cursor
+    // Append Some Data
     //
-    var cur = conn.cursor();
-    defer cur.deinit();
+    try conn.run("DROP TABLE IF EXISTS cars;", .{});
 
-    //
-    // let's run some queries
-    //
-    try cur.execute("DROP TABLE IF EXISTS Cars;", .{});
-    try cur.execute(
-        \\CREATE TABLE IF NOT EXISTS Cars(
-        \\  id      INTEGER PRIMARY KEY,
-        \\  name    VARCHAR(20),
-        \\  price   INTEGER
-        \\);
+    try conn.run(
+        \\CREATE TABLE IF NOT EXISTS cars (
+        \\    id    SERIAL PRIMARY KEY,
+        \\    name  VARCHAR(20),
+        \\    price INT
+        \\)
     , .{});
-    try cur.execute("INSERT INTO CARS VALUES(1,'Gol',200)", .{});
-    try cur.execute("INSERT INTO CARS VALUES(2,'Mercedes',57127)", .{});
-    try cur.execute("INSERT INTO CARS VALUES(3,'Skoda',9000)", .{});
-    try cur.execute("INSERT INTO CARS VALUES(4,'Volvo',29000)", .{});
-    try cur.execute("INSERT INTO CARS VALUES(5,'BMW',78000)", .{});
+
+    try conn.run(
+        \\INSERT INTO cars (name, price) VALUES
+        \\  ('Gol', 200),
+        \\  ('BMW', 78000),
+        \\  ('Skoda', 9000),
+        \\  ('Volvo', 29000),
+        \\  ('Mercedes', 57127)
+    , .{});
 
     //
-    // The rule is simple: kill the bitch (memory) after using
+    // Fetch Some Data
     //
+    var result = try conn.exec(
+        "SELECT id, price, name FROM cars", .{}
+    );
+    defer result.deinit();
 
-    const Car = struct {
-        id: usize,
-        name: []const u8,
-        price: usize,
+    //
+    // Iterate Over The Data
+    //
+    var rows = result.rows(ally); // TODO: remove this allocations [only structs are allocated]
+    defer rows.deinit()
+    while (rows.next()) |row| {
+        var id: u8 = undefined;
+        var price: usize = undefined;
+        var name: []const u8 = undefined;
+        try row.scan(.{ &id, &name, &price });
+
+        std.debug.print("id: {}, name: {s}, price: {}\n", .{ id, name, price });
+
+        // INFO: This API is in the plans
+        // const car = try row.from(struct { id: u8, price: usize, name: []const u8 });
+    }
+
+    //
+    // Get A Specific Row by name or index
+    //
+    const row_zero = 0;
+    const row = try result.getRow(row_zero);
+    const id = try row.get(u8, "id");
+    const name = try row.get([]const u8, 2);
+    std.debug.print("row: {} id: {}, name: {s}\n", .{ row_zero, id, name});
+
+    //
+    //  Update Some Data With Parameters
+    //
+    const query = "INSERT INTO cars (name, price) VALUES ($1, $2)";
+    const values = .{
+        "Savero",
+        "322",          //INFO: See conn.execBin() to use 332 as comptime_int
     };
+    try conn.run(query, values);
 
-    try cur.execute("SELECT * FROM Cars", .{});
-    {
-        var result = try cur.fetch(allocator, Car);
-        defer result.deinit();
+    //
+    // Transaction
+    //
+    var tx = try conn.beginTx();
+    defer tx.commit() catch unreachable;
 
-        for (result.data) |car| {
-            try expect(@TypeOf(car) == Car);
-            std.debug.print("id: {}, name: {s}, price: ${}\n", .{ car.id, car.name, car.price });
-        }
-    }
+    try tx.run(
+        \\INSERT INTO cars (name, price) VALUES
+        \\  ('HB20', 7000)
+    , .{});
 
-    try cur.execute("SELECT * FROM Cars WHERE id = 1 OR id = 4", .{});
-    {
-        var record = try cur.fetch(allocator, []const u8);
-        defer record.deinit();
-        const rows = record.data;
-        for (rows, 0..) |row, i| {
-            try expect(@TypeOf(row) == []const []const u8);
-            std.debug.print("row {}:  {s}\n", .{ i, row });
-        }
-    }
-
-    try cur.execute("SELECT 1 + 1 + 1", .{});
-    {
-        var record = try cur.fetch(allocator, usize);
-        defer record.deinit();
-        const data = record.data[0][0];
-        try expect(@TypeOf(data) == usize);
-        std.debug.print("{}\n", .{data});
-    }
-
-    try cur.execute("SELECT * FROM Cars", .{});
-    {
-        var iter = cur.fetchIter(allocator);
-        while (try iter.next()) |row| {
-            defer allocator.free(row);
-            std.debug.print("{s}\n", .{row});
-        }
-    }
+    // if some random shit happened
+    if (true) try conn.rollBack();
 }
-
 ```
