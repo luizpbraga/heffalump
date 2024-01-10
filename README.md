@@ -102,7 +102,8 @@ test "Hefallump Examples" {
     //
     // Iterate Over The Data
     //
-    var rows = result.rows(ally);
+    var rows = result.rows(ally); // TODO: remove this allocations [only structs are allocated]
+    defer rows.deinit()
     while (rows.next()) |row| {
         var id: u8 = undefined;
         var price: usize = undefined;
@@ -112,7 +113,7 @@ test "Hefallump Examples" {
         std.debug.print("id: {}, name: {s}, price: {}\n", .{ id, name, price });
 
         // INFO: This API is in the plans
-        // const car = try row.from(.{ id: u8, price: usize, name: []const u8 });
+        // const car = try row.from(struct { id: u8, price: usize, name: []const u8 });
     }
 
     //
@@ -130,7 +131,7 @@ test "Hefallump Examples" {
     const query = "INSERT INTO cars (name, price) VALUES ($1, $2)";
     const values = .{
         "Savero",
-        "322",          //INFO: See conn.execBin() to use 333 as comptime_int
+        "322",          //INFO: See conn.execBin() to use 332 as comptime_int
     };
     try conn.run(query, values);
 
