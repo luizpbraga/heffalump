@@ -9,26 +9,21 @@ for `libpq` (no implicit _exit(1)_, God please). See the [examples](#example).
 
 ### Build
 
-In your `build.zig`, add
+In your `build.zig`, add the `heffalump` module as a dependency
 
 ```zig
-// ...
 pub fn build(b: *std.Build) void {
-    const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
-    // ...
-    const heffalump = b.dependency("heffalump", .{
-        .target = target,
-        .optimize = optimize,
+    const exe = b.addExecutable(.{
+        // ...
     });
 
-    // ...
-    const exe = b.addExecutable(.{
-        // you config
-    });
-    // link to you exe or test
+    // *** create a dependency and import it ***
+    const heffalump = b.dependency("heffalump", .{});
     exe.root_module.addImport("heffalump", heffalump.module("heffalump"));
-    exe.linkLibrary(heffalump.artifact("heffalump"));
+
+    // ...
+    b.installArtifact(exe);
+    // ...
 }
 ```
 
@@ -38,17 +33,18 @@ And the `build.zig.zon` should look like this
 .{
     // ...
     .dependencies = .{
-        // ...
+        // Last version
         .heffalump = .{
-            .url = "https://github.com/luizpbraga/heffalump/archive/refs/tags/v0.0.1.tar.gz",
-            .hash = "122043f5d763462a23e11375f2d5938ad41651aad6e9c3b2f688f07be81ee59f1390",
+            .url = "https://github.com/luizpbraga/heffalump/archive/refs/tags/v0.0.1.1.tar.gz",
+            .hash = "122004985da631572a7255ec5d5f726af64790d922c5bd2da4ea2eb34ec91e16e42c",
         },
-    }
+    },
 }
-
 ```
 
 Then run `zig build`.
+
+> WARNING: You need `libpq`;
 
 ### Example
 
