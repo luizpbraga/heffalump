@@ -5,7 +5,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const heffalump_mod = b.addModule("heffalump", .{
-        .root_source_file = .{ .path = "./heffalump.zig" },
+        .root_source_file = .{ .path = "src/heffalump.zig" },
     });
 
     const tests = b.addTest(.{
